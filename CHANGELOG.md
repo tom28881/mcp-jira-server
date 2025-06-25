@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Fixed "Unexpected end of JSON input" error for transition-issue
+- Fixed "Cannot read properties of undefined" error for create-issue
+- Improved handling of empty API responses
+- Better error messages with context
+
+### Added
+- Comprehensive logging system with DEBUG support
+- Automatic retry with exponential backoff (3 attempts)
+- Connection testing on startup
+- Atlassian Document Format (ADF) support for rich text
+- Convenient run.sh script for easier execution
+- Input validation with detailed error messages
+- Robust error handling for all edge cases
+
+### Improved
+- More informative startup messages
+- Better handling of test ticket creation failures
+- Enhanced transition handling with available options display
+
 ## [1.0.0] - 2024-12-19
 
 ### Added

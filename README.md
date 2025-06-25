@@ -93,6 +93,8 @@ Create a `.env` file in the server directory and run:
 ```bash
 cd /path/to/mcp-jira-server
 claude --mcp "node dist/index.js"
+# or use the convenient run script:
+claude --mcp "./run.sh"
 ```
 
 ### Option 3: Add to Claude Code Settings
@@ -207,6 +209,30 @@ npm run typecheck
 npm run lint
 ```
 
+## Features
+
+### 🔄 Automatic Retry
+The server automatically retries failed requests with exponential backoff (up to 3 attempts).
+
+### 📦 Robust Error Handling
+- Empty response handling for Jira transitions
+- Detailed error messages with context
+- Graceful degradation for missing features
+
+### 📝 Comprehensive Logging
+Enable debug logging to see detailed information:
+```bash
+DEBUG=* claude --mcp "./run.sh"
+# or specific to jira-mcp:
+DEBUG=jira-mcp claude --mcp "./run.sh"
+```
+
+### 🔒 Connection Testing
+The server tests the connection on startup and provides clear error messages if authentication fails.
+
+### 📄 Atlassian Document Format
+Automatically converts plain text and markdown to Jira's ADF format for rich text fields.
+
 ## Troubleshooting
 
 ### Common Issues
@@ -229,8 +255,18 @@ npm run lint
 Set the `DEBUG` environment variable for verbose logging:
 
 ```bash
-DEBUG=* node dist/index.js
+DEBUG=* claude --mcp "./run.sh"
+# or
+DEBUG=jira-mcp claude --mcp "./run.sh"
 ```
+
+### View Logs
+
+Logs are output to stderr and include:
+- Connection status
+- API requests and responses
+- Error details with context
+- Performance metrics
 
 ## Contributing
 

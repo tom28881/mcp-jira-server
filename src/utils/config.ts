@@ -1,7 +1,11 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
+import { createLogger } from './logger.js';
+
+const logger = createLogger('Config');
 
 dotenv.config();
+logger.debug('Environment variables loaded');
 
 const ConfigSchema = z.object({
   jiraHost: z.string().url().refine(url => url.includes('atlassian.net'), {
@@ -20,6 +24,8 @@ const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 
 export function loadConfig(): Config {
+  logger.info('Loading configuration...');
+  
   const rawConfig = {
     jiraHost: process.env.JIRA_HOST,
     jiraEmail: process.env.JIRA_EMAIL,
@@ -32,19 +38,53 @@ export function loadConfig(): Config {
     defaultAssignee: process.env.DEFAULT_ASSIGNEE
   };
 
+  // Log loaded values (mask sensitive data)
+  logger.debug('Raw configuration', {
+    jiraHost: rawConfig.jiraHost,
+    jiraEmail: rawConfig.jiraEmail,
+    jiraApiToken: rawConfig.jiraApiToken ? '***' : undefined,
+    defaultProject: rawConfig.defaultProject,
+    customFields: {
+      storyPoints: rawConfig.fieldStoryPoints,
+      acceptanceCriteria: rawConfig.fieldAcceptanceCriteria,
+      epicLink: rawConfig.fieldEpicLink
+    }
+  });
+
   try {
-    return ConfigSchema.parse(rawConfig);
+    const config = ConfigSchema.parse(rawConfig);
+    logger.info('Configuration loaded successfully');
+    return config;
   } catch (error) {
     if (error instanceof z.ZodError) {
       const missingFields = error.errors
         .filter(e => e.code === 'invalid_type' && e.received === 'undefined')
-        .map(e => e.path.join('.'));
+        .map(e => {
+          const field = e.path.join('.');
+          switch (field) {
+            case 'jiraHost': return 'JIRA_HOST';
+            case 'jiraEmail': return 'JIRA_EMAIL';
+            case 'jiraApiToken': return 'JIRA_API_TOKEN';
+            default: return field;
+          }
+        });
+      
+      const invalidFields = error.errors
+        .filter(e => e.code !== 'invalid_type' || e.received !== 'undefined')
+        .map(e => `${e.path.join('.')}: ${e.message}`);
       
       if (missingFields.length > 0) {
+        logger.error('Missing required environment variables', { missingFields });
         throw new Error(
           `Missing required environment variables: ${missingFields.join(', ')}\n` +
-          'Please check your .env file or environment configuration.'
+          'Please check your .env file or environment configuration.\n' +
+          'See .env.example for required variables.'
         );
+      }
+      
+      if (invalidFields.length > 0) {
+        logger.error('Invalid configuration values', { invalidFields });
+        throw new Error(`Configuration validation failed:\n${invalidFields.join('\n')}`);
       }
       
       throw new Error(`Configuration validation failed: ${error.message}`);
