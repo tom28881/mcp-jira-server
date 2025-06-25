@@ -12,9 +12,9 @@ const CreateIssueSchema = z.object({
   project: z.string().describe('Jira project key (e.g., "PROJ")'),
   summary: z.string().describe('Issue summary/title'),
   description: z.string().optional().describe('Issue description in markdown or plain text'),
-  issueType: z.enum(['Bug', 'Task', 'Story', 'Epic', 'Subtask']).describe('Type of issue'),
+  issueType: z.string().describe('Type of issue (e.g., "Bug", "Task", "Story", "Epic", "Subtask", "Úkol", "Dílčí úkol")'),
   assignee: z.string().optional().describe('Email or account ID of assignee'),
-  priority: z.enum(['Highest', 'High', 'Medium', 'Low', 'Lowest']).optional(),
+  priority: z.string().optional().describe('Priority (e.g., "Highest", "High", "Medium", "Low", "Lowest", or localized names)'),
   labels: z.array(z.string()).optional().describe('Labels to add to the issue'),
   components: z.array(z.string()).optional().describe('Component names'),
   storyPoints: z.number().optional().describe('Story points estimation'),
@@ -29,7 +29,7 @@ const UpdateIssueSchema = z.object({
   summary: z.string().optional(),
   description: z.string().optional(),
   assignee: z.string().optional(),
-  priority: z.enum(['Highest', 'High', 'Medium', 'Low', 'Lowest']).optional(),
+  priority: z.string().optional().describe('Priority name (can be localized)'),
   labels: z.array(z.string()).optional(),
   storyPoints: z.number().optional(),
   acceptanceCriteria: z.string().optional()
@@ -71,6 +71,14 @@ const DiagnoseFieldsSchema = z.object({
   issueType: z.string().describe('Issue type name')
 });
 
+const CreateTaskForEpicSchema = z.object({
+  project: z.string().describe('Project key'),
+  epicKey: z.string().describe('Epic issue key to link to'),
+  summary: z.string().describe('Task summary'),
+  description: z.string().optional().describe('Task description'),
+  issueType: z.string().optional().default('Úkol').describe('Issue type (defaults to "Úkol" for Czech Jira)')
+});
+
 const CreateEpicWithSubtasksSchema = z.object({
   project: z.string().describe('Project key'),
   epicSummary: z.string().describe('Epic summary'),
@@ -86,6 +94,26 @@ interface ToolDefinition {
   description: string;
   inputSchema: any;
   handler: (args: unknown) => Promise<any>;
+}
+
+// Common issue type mappings for different languages
+const issueTypeMap: Record<string, string[]> = {
+  'Epic': ['Epic', 'Epik', 'Epika'],
+  'Story': ['Story', 'User Story', 'Příběh', 'Uživatelský příběh'],
+  'Task': ['Task', 'Úkol'],
+  'Bug': ['Bug', 'Chyba', 'Defekt'],
+  'Subtask': ['Subtask', 'Sub-task', 'Dílčí úkol', 'Podúkol']
+};
+
+// Helper to detect issue type from localized name
+function normalizeIssueType(localizedType: string): string {
+  const normalized = localizedType.toLowerCase();
+  for (const [standard, variants] of Object.entries(issueTypeMap)) {
+    if (variants.some(v => v.toLowerCase() === normalized)) {
+      return standard;
+    }
+  }
+  return localizedType; // Return as-is if no mapping found
 }
 
 export function createIssueTools(client: JiraClient, config: Config): Record<string, ToolDefinition> {
@@ -162,6 +190,14 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
 
         if (params.epicLink && customFields.epicLink) {
           payload.fields[customFields.epicLink] = params.epicLink;
+          logger.debug('Adding epic link', { 
+            epicLink: params.epicLink, 
+            fieldId: customFields.epicLink 
+          });
+        } else if (params.epicLink && !customFields.epicLink) {
+          logger.warn('Epic link requested but no epic link field configured', {
+            epicLink: params.epicLink
+          });
         }
         
         // Handle parent field for subtasks
@@ -225,7 +261,7 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
         let response = `✅ Created issue ${issueKey}: ${summary}\n`;
         response += `🔗 ${JiraFormatter.formatIssueLink(issueKey, config.jiraHost)}`;
 
-        if ((params.createTestTicket ?? config.autoCreateTestTickets) && params.issueType === 'Story') {
+        if ((params.createTestTicket ?? config.autoCreateTestTickets) && normalizeIssueType(params.issueType) === 'Story') {
           try {
             logger.info('Creating test ticket for story', { storyKey: issueKey });
             
@@ -784,7 +820,7 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
           const epicPayload: any = {
             fields: {
               project: { key: params.project },
-              issuetype: { name: 'Epic' },
+              issuetype: { name: 'Epic' }, // Will be handled by Jira API
               summary: params.epicSummary
             }
           };
@@ -821,7 +857,7 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
               const subtaskPayload: any = {
                 fields: {
                   project: { key: params.project },
-                  issuetype: { name: 'Subtask' },
+                  issuetype: { name: 'Dílčí úkol' }, // Czech name for Subtask
                   summary: subtask.summary,
                   parent: { key: epicKey }  // Link subtask to epic as parent
                 }
@@ -855,18 +891,18 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
             }
           }
           
-          // Step 3: Create stories if subtasks failed (fallback)
-          const createdStories: string[] = [];
+          // Step 3: Create tasks if subtasks failed (fallback)
+          const createdTasks: string[] = [];
           if (failedSubtasks.length > 0) {
-            logger.info('Some subtasks failed, creating stories as fallback');
-            response += `⚠️ Some subtasks failed (Jira might not support subtasks under epics). Creating stories instead:\n\n`;
+            logger.info('Some subtasks failed, creating tasks as fallback');
+            response += `⚠️ Some subtasks failed (Jira might not support subtasks under epics). Creating tasks instead:\n\n`;
             
             for (const subtask of params.subtasks) {
               try {
                 const storyPayload: any = {
                   fields: {
                     project: { key: params.project },
-                    issuetype: { name: 'Story' },
+                    issuetype: { name: 'Úkol' }, // Use Task for Czech Jira
                     summary: subtask.summary
                   }
                 };
@@ -887,12 +923,12 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
                 const storyResult = await client.createIssue(storyPayload);
                 
                 if (storyResult.success && storyResult.data?.key) {
-                  const storyKey = storyResult.data.key;
-                  logger.info('Story created and linked to epic', { storyKey, epicKey });
-                  createdStories.push(`✅ ${storyKey}: ${subtask.summary} (linked to epic)`);
+                  const taskKey = storyResult.data.key;
+                  logger.info('Task created and linked to epic', { taskKey, epicKey });
+                  createdTasks.push(`✅ ${taskKey}: ${subtask.summary} (linked to epic)`);
                 }
               } catch (error) {
-                logger.error('Error creating story', { summary: subtask.summary, error });
+                logger.error('Error creating task', { summary: subtask.summary, error });
               }
             }
           }
@@ -902,13 +938,13 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
             response += `Subtasks created:\n${subtaskResults.join('\n')}\n`;
           }
           
-          if (createdStories.length > 0) {
-            response += `\nStories created:\n${createdStories.join('\n')}\n`;
+          if (createdTasks.length > 0) {
+            response += `\nTasks created:\n${createdTasks.join('\n')}\n`;
           }
           
-          if (failedSubtasks.length > 0 && createdStories.length === 0) {
+          if (failedSubtasks.length > 0 && createdTasks.length === 0) {
             response += `\nFailed:\n${failedSubtasks.join('\n')}\n`;
-            response += `\n💡 Tip: Jira might not support subtasks under epics. Try creating stories instead and link them using the epicLink field.`;
+            response += `\n💡 Tip: Jira might not support subtasks under epics. Try creating tasks instead and link them using the epicLink field.`;
           }
           
           return {
@@ -1181,6 +1217,108 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
           };
         } catch (error) {
           logger.error('Error in diagnose-fields handler', error);
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }]
+          };
+        }
+      }
+    },
+
+    'create-task-for-epic': {
+      description: 'Create a task linked to an epic (optimized for Czech Jira)',
+      inputSchema: zodToJsonSchema(CreateTaskForEpicSchema) as any,
+      handler: async (args: unknown) => {
+        try {
+          const params = CreateTaskForEpicSchema.parse(args);
+          logger.info('Creating task for epic', { 
+            project: params.project, 
+            epicKey: params.epicKey,
+            issueType: params.issueType
+          });
+          
+          const payload: any = {
+            fields: {
+              project: { key: params.project },
+              issuetype: { name: params.issueType || 'Úkol' },
+              summary: params.summary
+            }
+          };
+          
+          if (params.description) {
+            payload.fields.description = textToADF(params.description);
+          }
+          
+          // Try to add epic link if configured
+          if (customFields.epicLink) {
+            payload.fields[customFields.epicLink] = params.epicKey;
+            logger.debug('Adding epic link', { 
+              epicKey: params.epicKey, 
+              fieldId: customFields.epicLink 
+            });
+          } else {
+            logger.warn('No epic link field configured, task will be created without epic link');
+          }
+          
+          logger.debug('Create task payload', { payload });
+          
+          const result = await client.createIssue(payload);
+          
+          if (!result.success || !result.data?.key) {
+            logger.error('Failed to create task', { 
+              error: result.error,
+              payload: payload 
+            });
+            
+            // If it failed with epic link, try without it
+            if (customFields.epicLink && result.error?.includes('customfield')) {
+              logger.info('Retrying without epic link');
+              delete payload.fields[customFields.epicLink];
+              
+              const retryResult = await client.createIssue(payload);
+              if (retryResult.success && retryResult.data?.key) {
+                const taskKey = retryResult.data.key;
+                return {
+                  content: [{
+                    type: 'text',
+                    text: `✅ Created task ${taskKey}: ${params.summary}\n⚠️  Could not link to epic (field configuration issue)\n🔗 ${JiraFormatter.formatIssueLink(taskKey, config.jiraHost)}`
+                  }]
+                };
+              }
+            }
+            
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Failed to create task: ${result.error || 'Unknown error'}\n\n💡 Run diagnose-fields to check your epic link field configuration.`
+              }]
+            };
+          }
+          
+          const taskKey = result.data.key;
+          logger.info('Task created successfully', { taskKey, epicKey: params.epicKey });
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `✅ Created task ${taskKey}: ${params.summary}\n🔗 Linked to epic: ${params.epicKey}\n🔗 ${JiraFormatter.formatIssueLink(taskKey, config.jiraHost)}`
+            }]
+          };
+        } catch (error) {
+          logger.error('Error in create-task-for-epic handler', error);
+          
+          if (error instanceof z.ZodError) {
+            const issues = error.issues.map(issue => `- ${issue.path.join('.')}: ${issue.message}`).join('\n');
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Invalid parameters:\n${issues}`
+              }]
+            };
+          }
+          
           return {
             content: [{
               type: 'text',

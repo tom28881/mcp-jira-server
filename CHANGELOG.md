@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed subtask creation by properly using parent field
 - Fixed Epic-Story linking with proper error handling and guidance
 - Fixed linkTypes.map error by handling different API response structures
+- Fixed issue type validation for localized Jira instances
 
 ### Added
 - Comprehensive logging system with DEBUG support
@@ -29,9 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `get-link-types` tool to list available issue link types
 - New `get-fields` tool to show available fields for project/issue type
 - New `create-epic-with-subtasks` tool for creating epics with multiple subtasks
+- New `diagnose-fields` tool to find correct custom field IDs
+- New `create-task-for-epic` tool optimized for Czech Jira
 - Smart link type matching with fallback to available types
 - Parent field support for creating subtasks
 - Detection and guidance for Epic-Story system link attempts
+- Full localization support for issue types and priorities
+- Issue type mapping for multiple languages
 
 ### Improved
 - More informative startup messages
@@ -39,8 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced transition handling with available options display
 - Enhanced debug logging for create-issue payloads
 - Link-issues now shows available types on error
-- Automatic fallback to stories when subtasks under epics fail
+- Automatic fallback to tasks when subtasks under epics fail
 - Better handling of Czech and localized error messages
+- Issue type schema now accepts any string value for localized names
+- Priority schema now accepts any string value for localized names
 
 ## [1.0.0] - 2024-12-19
 

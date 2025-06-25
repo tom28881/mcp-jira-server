@@ -18,6 +18,7 @@ A Model Context Protocol (MCP) server that enables Claude Code to interact with 
 - **get-fields** - Show available fields for project/issue type
 - **create-epic-with-subtasks** - Create an epic with multiple subtasks in one operation
 - **diagnose-fields** - Diagnose field configuration issues and find correct custom field IDs
+- **create-task-for-epic** - Create a task linked to an epic (optimized for Czech Jira)
 
 ### Resources
 - `jira://projects` - List all accessible projects
@@ -147,6 +148,16 @@ Create an epic "Database Migration" in project PROJ with subtasks "Backup curren
 Create a subtask "Review code" for parent issue PROJ-123
 ```
 
+### Czech Jira Support
+
+```
+Create issue type "Úkol" in project PROJ
+```
+
+```
+Create task for epic PPC-48 with summary "Database backup"
+```
+
 ### Searching Issues
 
 ```
@@ -231,6 +242,12 @@ npm run lint
 ```
 
 ## Features
+
+### 🌍 Localization Support
+- Automatic support for localized Jira instances (Czech, English, etc.)
+- Issue type names can be in any language
+- Priority names support localization
+- Special support for Czech Jira configurations
 
 ### 🔄 Automatic Retry
 The server automatically retries failed requests with exponential backoff (up to 3 attempts).
