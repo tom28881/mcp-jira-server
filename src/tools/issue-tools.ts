@@ -19,7 +19,8 @@ const CreateIssueSchema = z.object({
   components: z.array(z.string()).optional().describe('Component names'),
   storyPoints: z.number().optional().describe('Story points estimation'),
   acceptanceCriteria: z.string().optional().describe('Acceptance criteria for stories'),
-  epicLink: z.string().optional().describe('Epic issue key to link to'),
+  epicLink: z.string().optional().describe('Epic issue key to link to (for Story/Task)'),
+  parent: z.string().optional().describe('Parent issue key (required for Subtask)'),
   createTestTicket: z.boolean().optional().describe('Auto-create linked test ticket for stories')
 });
 
@@ -63,6 +64,17 @@ const AddCommentSchema = z.object({
 const GetFieldsSchema = z.object({
   project: z.string().describe('Project key'),
   issueType: z.string().optional().describe('Issue type name')
+});
+
+const CreateEpicWithSubtasksSchema = z.object({
+  project: z.string().describe('Project key'),
+  epicSummary: z.string().describe('Epic summary'),
+  epicDescription: z.string().optional().describe('Epic description'),
+  subtasks: z.array(z.object({
+    summary: z.string().describe('Subtask summary'),
+    description: z.string().optional().describe('Subtask description'),
+    assignee: z.string().optional().describe('Assignee email or account ID')
+  })).describe('Array of subtasks to create')
 });
 
 interface ToolDefinition {
@@ -145,6 +157,12 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
 
         if (params.epicLink && customFields.epicLink) {
           payload.fields[customFields.epicLink] = params.epicLink;
+        }
+        
+        // Handle parent field for subtasks
+        if (params.parent) {
+          payload.fields.parent = { key: params.parent };
+          logger.debug('Adding parent field for subtask', { parent: params.parent });
         }
 
         // Log full payload for debugging
@@ -538,53 +556,77 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
             params.linkType
           );
 
+          // Check if this is an Epic-Story link attempt
+          if (!result.success && (
+            params.linkType.toLowerCase().includes('epic') || 
+            result.error?.includes('systémového propojení') ||
+            result.error?.includes('system link type')
+          )) {
+            logger.info('Epic-Story link detected, providing guidance');
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Epic-Story relationships cannot be created using link-issues.\n\nTo link a Story to an Epic:\n1. Update the story with epicLink field\n2. Or create the story with epicLink parameter\n\nExample: update-issue PROJ-123 with epicLink: "PROJ-100"`
+              }]
+            };
+          }
+          
           // If it fails due to link type not found, try to get available types and match
-          if (!result.success && result.error?.includes('typ odkazu')) {
+          if (!result.success && (result.error?.includes('typ odkazu') || result.error?.includes('link type'))) {
             logger.info('Link type not found, fetching available types');
             
             const linkTypesResult = await client.getLinkTypes();
             if (linkTypesResult.success && linkTypesResult.data) {
-              logger.debug('Available link types', { 
-                count: linkTypesResult.data.length,
-                types: linkTypesResult.data.map((lt: any) => ({ 
-                  name: lt.name, 
-                  inward: lt.inward, 
-                  outward: lt.outward 
-                }))
-              });
+              // Check if linkTypesResult.data is an array or has issueLinkTypes property
+              const linkTypes = Array.isArray(linkTypesResult.data) 
+                ? linkTypesResult.data 
+                : (linkTypesResult.data as any).issueLinkTypes || [];
               
-              // Try to find matching link type (case-insensitive)
-              const requestedType = params.linkType.toLowerCase();
-              const matchingType = linkTypesResult.data.find((lt: any) => {
-                return lt.name?.toLowerCase() === requestedType ||
-                       lt.inward?.toLowerCase() === requestedType ||
-                       lt.outward?.toLowerCase() === requestedType;
-              });
-              
-              if (matchingType) {
-                logger.info('Found matching link type', { 
-                  requested: params.linkType, 
-                  matched: matchingType.name 
+              if (Array.isArray(linkTypes) && linkTypes.length > 0) {
+                logger.debug('Available link types', { 
+                  count: linkTypes.length,
+                  types: linkTypes.map((lt: any) => ({ 
+                    name: lt.name, 
+                    inward: lt.inward, 
+                    outward: lt.outward 
+                  }))
                 });
                 
-                // Retry with the correct name
-                result = await client.linkIssues(
-                  params.inwardIssue,
-                  params.outwardIssue,
-                  matchingType.name
-                );
-              } else {
-                // Provide helpful error with available types
-                const availableTypes = linkTypesResult.data
-                  .map((lt: any) => `"${lt.name}" (${lt.inward}/${lt.outward})`)
-                  .join(', ');
+                // Try to find matching link type (case-insensitive)
+                const requestedType = params.linkType.toLowerCase();
+                const matchingType = linkTypes.find((lt: any) => {
+                  return lt.name?.toLowerCase() === requestedType ||
+                         lt.inward?.toLowerCase() === requestedType ||
+                         lt.outward?.toLowerCase() === requestedType;
+                });
+                
+                if (matchingType) {
+                  logger.info('Found matching link type', { 
+                    requested: params.linkType, 
+                    matched: matchingType.name 
+                  });
                   
-                return {
-                  content: [{
-                    type: 'text',
-                    text: `❌ Link type "${params.linkType}" not found.\nAvailable types: ${availableTypes}`
-                  }]
-                };
+                  // Retry with the correct name
+                  result = await client.linkIssues(
+                    params.inwardIssue,
+                    params.outwardIssue,
+                    matchingType.name
+                  );
+                } else {
+                  // Provide helpful error with available types
+                  const availableTypes = linkTypes
+                    .map((lt: any) => `"${lt.name}" (${lt.inward}/${lt.outward})`)
+                    .join(', ');
+                    
+                  return {
+                    content: [{
+                      type: 'text',
+                      text: `❌ Link type "${params.linkType}" not found.\nAvailable types: ${availableTypes}`
+                    }]
+                  };
+                }
+              } else {
+                logger.warn('No link types found or invalid response structure', linkTypesResult.data);
               }
             }
           }
@@ -651,7 +693,10 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
             };
           }
           
-          const linkTypes = result.data;
+          // Handle different response structures from Jira API
+          const linkTypes = Array.isArray(result.data) 
+            ? result.data 
+            : ((result.data as any).issueLinkTypes || []);
           logger.debug('Retrieved link types', { count: linkTypes.length });
           
           // Format the response
@@ -700,6 +745,177 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
             text: `✅ Added comment to ${params.issueKey}`
           }]
         };
+      }
+    },
+
+    'create-epic-with-subtasks': {
+      description: 'Create an epic with subtasks in one operation',
+      inputSchema: zodToJsonSchema(CreateEpicWithSubtasksSchema) as any,
+      handler: async (args: unknown) => {
+        try {
+          const params = CreateEpicWithSubtasksSchema.parse(args);
+          logger.info('Creating epic with subtasks', { 
+            project: params.project, 
+            subtaskCount: params.subtasks.length 
+          });
+          
+          // Step 1: Create the epic
+          const epicPayload: any = {
+            fields: {
+              project: { key: params.project },
+              issuetype: { name: 'Epic' },
+              summary: params.epicSummary
+            }
+          };
+          
+          if (params.epicDescription) {
+            epicPayload.fields.description = textToADF(params.epicDescription);
+          }
+          
+          logger.debug('Creating epic', epicPayload);
+          const epicResult = await client.createIssue(epicPayload);
+          
+          if (!epicResult.success || !epicResult.data?.key) {
+            logger.error('Failed to create epic', { error: epicResult.error });
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Failed to create epic: ${epicResult.error || 'Unknown error'}`
+              }]
+            };
+          }
+          
+          const epicKey = epicResult.data.key;
+          logger.info('Epic created successfully', { epicKey });
+          
+          let response = `✅ Created epic ${epicKey}: ${params.epicSummary}\n`;
+          response += `🔗 ${JiraFormatter.formatIssueLink(epicKey, config.jiraHost)}\n\n`;
+          
+          // Step 2: Create subtasks
+          const subtaskResults: string[] = [];
+          const failedSubtasks: string[] = [];
+          
+          for (const subtask of params.subtasks) {
+            try {
+              const subtaskPayload: any = {
+                fields: {
+                  project: { key: params.project },
+                  issuetype: { name: 'Subtask' },
+                  summary: subtask.summary,
+                  parent: { key: epicKey }  // Link subtask to epic as parent
+                }
+              };
+              
+              if (subtask.description) {
+                subtaskPayload.fields.description = textToADF(subtask.description);
+              }
+              
+              if (subtask.assignee) {
+                subtaskPayload.fields.assignee = { accountId: subtask.assignee };
+              }
+              
+              logger.debug('Creating subtask', subtaskPayload);
+              const subtaskResult = await client.createIssue(subtaskPayload);
+              
+              if (subtaskResult.success && subtaskResult.data?.key) {
+                const subtaskKey = subtaskResult.data.key;
+                logger.info('Subtask created', { subtaskKey, epicKey });
+                subtaskResults.push(`✅ ${subtaskKey}: ${subtask.summary}`);
+              } else {
+                logger.error('Failed to create subtask', { 
+                  summary: subtask.summary, 
+                  error: subtaskResult.error 
+                });
+                failedSubtasks.push(`❌ "${subtask.summary}": ${subtaskResult.error || 'Unknown error'}`);
+              }
+            } catch (error) {
+              logger.error('Error creating subtask', { summary: subtask.summary, error });
+              failedSubtasks.push(`❌ "${subtask.summary}": ${error instanceof Error ? error.message : 'Unknown error'}`);
+            }
+          }
+          
+          // Step 3: Create stories if subtasks failed (fallback)
+          const createdStories: string[] = [];
+          if (failedSubtasks.length > 0) {
+            logger.info('Some subtasks failed, creating stories as fallback');
+            response += `⚠️ Some subtasks failed (Jira might not support subtasks under epics). Creating stories instead:\n\n`;
+            
+            for (const subtask of params.subtasks) {
+              try {
+                const storyPayload: any = {
+                  fields: {
+                    project: { key: params.project },
+                    issuetype: { name: 'Story' },
+                    summary: subtask.summary
+                  }
+                };
+                
+                if (subtask.description) {
+                  storyPayload.fields.description = textToADF(subtask.description);
+                }
+                
+                if (subtask.assignee) {
+                  storyPayload.fields.assignee = { accountId: subtask.assignee };
+                }
+                
+                // Link story to epic using epic link field
+                if (customFields.epicLink) {
+                  storyPayload.fields[customFields.epicLink] = epicKey;
+                }
+                
+                const storyResult = await client.createIssue(storyPayload);
+                
+                if (storyResult.success && storyResult.data?.key) {
+                  const storyKey = storyResult.data.key;
+                  logger.info('Story created and linked to epic', { storyKey, epicKey });
+                  createdStories.push(`✅ ${storyKey}: ${subtask.summary} (linked to epic)`);
+                }
+              } catch (error) {
+                logger.error('Error creating story', { summary: subtask.summary, error });
+              }
+            }
+          }
+          
+          // Format response
+          if (subtaskResults.length > 0) {
+            response += `Subtasks created:\n${subtaskResults.join('\n')}\n`;
+          }
+          
+          if (createdStories.length > 0) {
+            response += `\nStories created:\n${createdStories.join('\n')}\n`;
+          }
+          
+          if (failedSubtasks.length > 0 && createdStories.length === 0) {
+            response += `\nFailed:\n${failedSubtasks.join('\n')}\n`;
+            response += `\n💡 Tip: Jira might not support subtasks under epics. Try creating stories instead and link them using the epicLink field.`;
+          }
+          
+          return {
+            content: [{
+              type: 'text',
+              text: response
+            }]
+          };
+        } catch (error) {
+          logger.error('Error in create-epic-with-subtasks handler', error);
+          
+          if (error instanceof z.ZodError) {
+            const issues = error.issues.map(issue => `- ${issue.path.join('.')}: ${issue.message}`).join('\n');
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Invalid parameters:\n${issues}`
+              }]
+            };
+          }
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }]
+          };
+        }
       }
     },
 

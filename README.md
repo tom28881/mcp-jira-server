@@ -7,7 +7,7 @@ A Model Context Protocol (MCP) server that enables Claude Code to interact with 
 ## Features
 
 ### Tools
-- **create-issue** - Create new Jira issues with full field support
+- **create-issue** - Create new Jira issues with full field support (including subtasks with parent field)
 - **update-issue** - Update existing issues
 - **get-issue** - Retrieve detailed issue information
 - **search-issues** - Search using JQL or simplified filters
@@ -16,6 +16,7 @@ A Model Context Protocol (MCP) server that enables Claude Code to interact with 
 - **add-comment** - Add comments to issues
 - **get-link-types** - List available issue link types
 - **get-fields** - Show available fields for project/issue type
+- **create-epic-with-subtasks** - Create an epic with multiple subtasks in one operation
 
 ### Resources
 - `jira://projects` - List all accessible projects
@@ -133,6 +134,18 @@ Create a new bug in project PROJ with high priority about login issues
 Create a story "Implement user authentication" with 5 story points and assign it to john@example.com
 ```
 
+### Creating Epics with Subtasks
+
+```
+Create an epic "Database Migration" in project PROJ with subtasks "Backup current data" and "Migrate schema"
+```
+
+### Creating Subtasks
+
+```
+Create a subtask "Review code" for parent issue PROJ-123
+```
+
 ### Searching Issues
 
 ```
@@ -155,6 +168,11 @@ Transition PROJ-456 to "In Progress"
 
 ```
 Link PROJ-123 to PROJ-456 as "blocks"
+```
+
+**Note**: Epic-Story relationships use the epicLink field, not regular issue links:
+```
+Update PROJ-456 with epicLink "PROJ-100"  # Links story to epic
 ```
 
 ### Using Prompts

@@ -17,6 +17,16 @@ Create a story in PROJ titled "Add user profile page" with description "As a use
 Create a task "Update documentation" in project DOCS with labels ["documentation", "Q1-2024"]
 ```
 
+### Subtask Creation
+```
+Create a subtask "Code review" with parent PROJ-123
+```
+
+### Epic with Subtasks
+```
+Create an epic "Q1 Features" in project PROJ with subtasks [{"summary": "Design UI"}, {"summary": "Implement backend"}]
+```
+
 ## Searching Issues
 
 ### Find My Tasks
@@ -177,4 +187,26 @@ The link-issues tool now automatically matches link types:
 Link PROJ-1 blocks PROJ-2
 Link PROJ-1 Blocks PROJ-2  
 Link PROJ-1 BLOCKS PROJ-2
+```
+
+### Epic-Story Relationships
+Epics and Stories use a special relationship in Jira:
+```
+# Link a story to an epic:
+Update PROJ-456 with epicLink "PROJ-100"
+
+# Or create the story with epic link:
+Create a story "User login" in project PROJ with epicLink "PROJ-100"
+```
+
+### Creating Complete Epic Structures
+```
+# Create epic with all its stories/subtasks at once:
+Use create-epic-with-subtasks for project PROJ:
+- Epic: "Database Migration"
+- Subtasks: 
+  - "Backup current database"
+  - "Create migration scripts"
+  - "Test migration process"
+  - "Execute migration"
 ```

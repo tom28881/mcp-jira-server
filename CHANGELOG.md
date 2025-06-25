@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Better error messages with context
 - Fixed link-issues with case-insensitive matching
 - Better handling of fields not available for certain issue types
+- Fixed subtask creation by properly using parent field
+- Fixed Epic-Story linking with proper error handling and guidance
+- Fixed linkTypes.map error by handling different API response structures
 
 ### Added
 - Comprehensive logging system with DEBUG support
@@ -25,7 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Robust error handling for all edge cases
 - New `get-link-types` tool to list available issue link types
 - New `get-fields` tool to show available fields for project/issue type
+- New `create-epic-with-subtasks` tool for creating epics with multiple subtasks
 - Smart link type matching with fallback to available types
+- Parent field support for creating subtasks
+- Detection and guidance for Epic-Story system link attempts
 
 ### Improved
 - More informative startup messages
@@ -33,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced transition handling with available options display
 - Enhanced debug logging for create-issue payloads
 - Link-issues now shows available types on error
+- Automatic fallback to stories when subtasks under epics fail
+- Better handling of Czech and localized error messages
 
 ## [1.0.0] - 2024-12-19
 
