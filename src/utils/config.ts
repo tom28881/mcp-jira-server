@@ -17,6 +17,7 @@ const ConfigSchema = z.object({
   fieldStoryPoints: z.string().optional(), // No default - will be auto-detected
   fieldAcceptanceCriteria: z.string().optional(), // No default - will be auto-detected
   fieldEpicLink: z.string().optional(), // No default - will be auto-detected
+  fieldStartDate: z.string().optional(), // No default - will be auto-detected
   autoCreateTestTickets: z.boolean().optional().default(false),
   defaultAssignee: z.string().optional(),
   autoDetectFields: z.boolean().optional().default(true) // Enable auto-detection by default
@@ -35,6 +36,7 @@ export function loadConfig(): Config {
     fieldStoryPoints: process.env.JIRA_FIELD_STORY_POINTS,
     fieldAcceptanceCriteria: process.env.JIRA_FIELD_ACCEPTANCE_CRITERIA,
     fieldEpicLink: process.env.JIRA_FIELD_EPIC_LINK,
+    fieldStartDate: process.env.JIRA_FIELD_START_DATE,
     autoCreateTestTickets: process.env.AUTO_CREATE_TEST_TICKETS === 'true',
     defaultAssignee: process.env.DEFAULT_ASSIGNEE,
     autoDetectFields: process.env.AUTO_DETECT_FIELDS !== 'false' // Default true unless explicitly disabled

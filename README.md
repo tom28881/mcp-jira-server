@@ -136,6 +136,20 @@ Create a new bug in project PROJ with high priority about login issues
 Create a story "Implement user authentication" with 5 story points and assign it to john@example.com
 ```
 
+### Setting Dates and Time Estimates
+
+```
+Create task "Database backup" with dueDate "next week" and originalEstimate "4h"
+```
+
+```
+Update PROJ-123 with startDate "tomorrow" and dueDate "+14d"
+```
+
+```
+Create issue "Quarterly review" with dueDate "31.3.2025" and originalEstimate "2 days"
+```
+
 ### Creating Epics with Subtasks
 
 ```
@@ -166,6 +180,20 @@ Find all open bugs assigned to me
 
 ```
 Search for issues in project PROJ with label "urgent" that are not done
+```
+
+### Date-based Searching
+
+```
+Search issues due before "next week" in project PROJ
+```
+
+```
+Find issues created after "2024-12-01" and updated after "yesterday"
+```
+
+```
+Search for overdue issues: dueBefore "today" and status != "Done"
 ```
 
 ### Managing Issues
@@ -261,6 +289,17 @@ npm run lint
 - Priority names support localization (e.g., "High", "Vysoká", "Hoch")
 - Special support for Czech Jira configurations
 - Works with any Jira language setting
+
+### 📅 Date and Time Management
+- Flexible date input formats:
+  - ISO: "2024-12-31"
+  - European: "31.12.2024" or "31/12/2024"
+  - Relative: "today", "tomorrow", "next week", "+7d", "+2w", "+1m"
+  - Czech: "dnes", "zítra", "příští týden"
+- Time tracking support:
+  - Estimates: "2h", "1d 4h", "3 days", "2 hodiny"
+  - Automatic format conversion
+- Date-based searching and filtering
 
 ### 🔄 Automatic Retry
 The server automatically retries failed requests with exponential backoff (up to 3 attempts).

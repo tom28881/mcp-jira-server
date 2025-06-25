@@ -27,6 +27,16 @@ Create a subtask "Code review" with parent PROJ-123
 Create an epic "Q1 Features" in project PROJ with subtasks [{"summary": "Design UI"}, {"summary": "Implement backend"}]
 ```
 
+### Issue with Dates
+```
+Create a task "Prepare monthly report" with dueDate "end of month" and originalEstimate "4h"
+```
+
+### Sprint Task
+```
+Create story "Implement OAuth login" with startDate "tomorrow" dueDate "+2w" and originalEstimate "3d"
+```
+
 ## Searching Issues
 
 ### Find My Tasks

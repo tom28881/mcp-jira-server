@@ -5,6 +5,7 @@ import { JiraFormatter } from '../utils/formatter.js';
 import { Config } from '../utils/config.js';
 import { createLogger } from '../utils/logger.js';
 import { textToADF } from '../utils/adf-converter.js';
+import { parseDate, parseTimeEstimate } from '../utils/date-parser.js';
 
 const logger = createLogger('IssueTools');
 
@@ -21,6 +22,9 @@ const CreateIssueSchema = z.object({
   acceptanceCriteria: z.string().optional().describe('Acceptance criteria for stories'),
   epicLink: z.string().optional().describe('Epic issue key to link to (for Story/Task)'),
   parent: z.string().optional().describe('Parent issue key (required for Subtask)'),
+  dueDate: z.string().optional().describe('Due date (formats: "2024-12-31", "31.12.2024", "tomorrow", "next week", "+7d")'),
+  startDate: z.string().optional().describe('Start date (same formats as dueDate)'),
+  originalEstimate: z.string().optional().describe('Original time estimate (e.g., "2h", "1d", "3d 4h")'),
   createTestTicket: z.boolean().optional().describe('Auto-create linked test ticket for stories')
 });
 
@@ -32,7 +36,11 @@ const UpdateIssueSchema = z.object({
   priority: z.string().optional().describe('Priority name (can be localized)'),
   labels: z.array(z.string()).optional(),
   storyPoints: z.number().optional(),
-  acceptanceCriteria: z.string().optional()
+  acceptanceCriteria: z.string().optional(),
+  dueDate: z.string().optional().describe('Due date (formats: "2024-12-31", "31.12.2024", "tomorrow", "next week", "+7d")'),
+  startDate: z.string().optional().describe('Start date (same formats as dueDate)'),
+  originalEstimate: z.string().optional().describe('Original time estimate (e.g., "2h", "1d", "3d 4h")'),
+  remainingEstimate: z.string().optional().describe('Remaining time estimate (e.g., "1h", "2d")')
 });
 
 const SearchIssuesSchema = z.object({
@@ -42,6 +50,11 @@ const SearchIssuesSchema = z.object({
   assignee: z.string().optional().describe('Filter by assignee (email or "currentUser")'),
   status: z.string().optional().describe('Filter by status'),
   labels: z.array(z.string()).optional().describe('Filter by labels'),
+  dueBefore: z.string().optional().describe('Filter by due date before (e.g., "2024-12-31", "next week")'),
+  dueAfter: z.string().optional().describe('Filter by due date after (e.g., "2024-01-01", "today")'),
+  createdAfter: z.string().optional().describe('Filter by created date after'),
+  createdBefore: z.string().optional().describe('Filter by created date before'),
+  updatedAfter: z.string().optional().describe('Filter by updated date after'),
   maxResults: z.number().optional().default(20).describe('Maximum results to return')
 });
 
@@ -121,7 +134,8 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
   const customFields = {
     storyPoints: config.fieldStoryPoints,
     acceptanceCriteria: config.fieldAcceptanceCriteria,
-    epicLink: config.fieldEpicLink
+    epicLink: config.fieldEpicLink,
+    startDate: config.fieldStartDate
   };
 
   return {
@@ -205,6 +219,37 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
         if (params.parent) {
           payload.fields.parent = { key: params.parent };
           logger.debug('Adding parent field for subtask', { parent: params.parent });
+        }
+        
+        // Handle date fields
+        if (params.dueDate) {
+          payload.fields.duedate = parseDate(params.dueDate);
+          logger.debug('Adding due date', { 
+            original: params.dueDate, 
+            parsed: payload.fields.duedate 
+          });
+        }
+        
+        if (params.startDate) {
+          // Try custom field first, then standard field
+          const startDateField = customFields.startDate || 'customfield_10015'; // Common start date field
+          payload.fields[startDateField] = parseDate(params.startDate);
+          logger.debug('Adding start date', { 
+            original: params.startDate, 
+            parsed: payload.fields[startDateField],
+            field: startDateField
+          });
+        }
+        
+        // Handle time tracking
+        if (params.originalEstimate) {
+          payload.fields.timetracking = {
+            originalEstimate: parseTimeEstimate(params.originalEstimate)
+          };
+          logger.debug('Adding time estimate', { 
+            original: params.originalEstimate, 
+            parsed: payload.fields.timetracking.originalEstimate 
+          });
         }
 
         // Log full payload for debugging
@@ -382,6 +427,27 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
             payload.fields[customFields.acceptanceCriteria] = params.acceptanceCriteria;
           }
         }
+        
+        // Handle date fields
+        if (params.dueDate) {
+          payload.fields.duedate = parseDate(params.dueDate);
+        }
+        
+        if (params.startDate) {
+          const startDateField = customFields.startDate || 'customfield_10015';
+          payload.fields[startDateField] = parseDate(params.startDate);
+        }
+        
+        // Handle time tracking
+        if (params.originalEstimate || params.remainingEstimate) {
+          payload.fields.timetracking = {};
+          if (params.originalEstimate) {
+            payload.fields.timetracking.originalEstimate = parseTimeEstimate(params.originalEstimate);
+          }
+          if (params.remainingEstimate) {
+            payload.fields.timetracking.remainingEstimate = parseTimeEstimate(params.remainingEstimate);
+          }
+        }
 
         const result = await client.updateIssue(params.issueKey, payload);
 
@@ -464,6 +530,27 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
           
           if (params.labels && params.labels.length > 0) {
             conditions.push(`labels in (${params.labels.map(l => `"${l}"`).join(', ')})`);
+          }
+          
+          // Date filters
+          if (params.dueBefore) {
+            conditions.push(`due < "${parseDate(params.dueBefore)}"`);
+          }
+          
+          if (params.dueAfter) {
+            conditions.push(`due > "${parseDate(params.dueAfter)}"`);
+          }
+          
+          if (params.createdBefore) {
+            conditions.push(`created < "${parseDate(params.createdBefore)}"`);
+          }
+          
+          if (params.createdAfter) {
+            conditions.push(`created > "${parseDate(params.createdAfter)}"`);
+          }
+          
+          if (params.updatedAfter) {
+            conditions.push(`updated > "${parseDate(params.updatedAfter)}"`);
           }
           
           jql = conditions.join(' AND ') || 'ORDER BY created DESC';
