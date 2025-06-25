@@ -34,9 +34,20 @@ export class JiraClient {
     endpoint: string, 
     body?: any
   ): Promise<JiraApiResponse<T>> {
-    const url = `${this.baseUrl}${endpoint}`;
+    // Handle different API bases
+    let url: string;
+    if (endpoint.startsWith('/rest/agile/')) {
+      // Agile API
+      url = `${this.baseUrl.replace('/rest/api/3', '')}${endpoint}`;
+    } else if (endpoint.startsWith('/')) {
+      // Regular API with full path
+      url = `${this.baseUrl}${endpoint}`;
+    } else {
+      // Regular API endpoint
+      url = `${this.baseUrl}/${endpoint}`;
+    }
     
-    logger.debug(`${method} ${endpoint}`, { body });
+    logger.debug(`${method} ${endpoint}`, { body, url });
 
     try {
       const response = await retry(async () => {
@@ -254,6 +265,23 @@ export class JiraClient {
     return this.request<any>('POST', `/issue/${issueKey}/comment`, payload);
   }
 
+  async getComments(issueKey: string, maxResults: number = 50, orderBy: string = '-created'): Promise<JiraApiResponse<any>> {
+    logger.info('Getting comments', { issueKey, maxResults, orderBy });
+    const params = new URLSearchParams({
+      maxResults: maxResults.toString(),
+      orderBy
+    });
+    return this.request<any>('GET', `/issue/${issueKey}/comment?${params}`);
+  }
+
+  async getHistory(issueKey: string, maxResults: number = 50): Promise<JiraApiResponse<any>> {
+    logger.info('Getting issue history', { issueKey, maxResults });
+    const params = new URLSearchParams({
+      maxResults: maxResults.toString()
+    });
+    return this.request<any>('GET', `/issue/${issueKey}/changelog?${params}`);
+  }
+
   async addAttachment(issueKey: string, fileName: string, fileContent: Buffer): Promise<JiraApiResponse<any>> {
     logger.info('Adding attachment', { issueKey, fileName, fileSize: fileContent.length });
     const formData = new FormData();
@@ -288,6 +316,124 @@ export class JiraClient {
         error: error instanceof Error ? error.message : 'Unknown error occurred' 
       };
     }
+  }
+
+  async getAttachments(issueKey: string): Promise<JiraApiResponse<any[]>> {
+    logger.info('Getting attachments', { issueKey });
+    const result = await this.getIssue(issueKey, ['attachment']);
+    
+    if (!result.success || !result.data) {
+      return { success: false, error: result.error };
+    }
+    
+    const attachments = result.data.fields?.attachment || [];
+    return { success: true, data: attachments };
+  }
+
+  async downloadAttachment(attachmentUrl: string): Promise<JiraApiResponse<Buffer>> {
+    logger.info('Downloading attachment', { url: attachmentUrl });
+    
+    try {
+      const response = await fetch(attachmentUrl, {
+        headers: this.headers
+      });
+
+      if (!response.ok) {
+        logger.error('Failed to download attachment', { status: response.status });
+        return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      logger.info('Attachment downloaded successfully', { size: buffer.length });
+      
+      return { success: true, data: buffer };
+    } catch (error) {
+      logger.error('Attachment download error', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error occurred' 
+      };
+    }
+  }
+
+  // Sprint management methods
+  async getBoards(): Promise<JiraApiResponse<any>> {
+    logger.info('Getting boards');
+    return this.request<any>('GET', '/rest/agile/1.0/board');
+  }
+
+  async getSprints(boardId: string): Promise<JiraApiResponse<any>> {
+    logger.info('Getting sprints', { boardId });
+    return this.request<any>('GET', `/rest/agile/1.0/board/${boardId}/sprint`);
+  }
+
+  async getSprintDetails(sprintId: string): Promise<JiraApiResponse<any>> {
+    logger.info('Getting sprint details', { sprintId });
+    return this.request<any>('GET', `/rest/agile/1.0/sprint/${sprintId}`);
+  }
+
+  async getSprintIssues(sprintId: string): Promise<JiraApiResponse<any>> {
+    logger.info('Getting sprint issues', { sprintId });
+    return this.request<any>('GET', `/rest/agile/1.0/sprint/${sprintId}/issue`);
+  }
+
+  async moveIssueToSprint(issueKey: string, sprintId: string): Promise<JiraApiResponse<void>> {
+    logger.info('Moving issue to sprint', { issueKey, sprintId });
+    const payload = {
+      issues: [issueKey]
+    };
+    return this.request<void>('POST', `/rest/agile/1.0/sprint/${sprintId}/issue`, payload);
+  }
+
+  async removeIssueFromSprint(issueKey: string): Promise<JiraApiResponse<void>> {
+    logger.info('Removing issue from sprint', { issueKey });
+    const payload = {
+      issues: [issueKey]
+    };
+    return this.request<void>('POST', '/rest/agile/1.0/backlog/issue', payload);
+  }
+
+  async createSprint(boardId: string, name: string, startDate?: string, endDate?: string): Promise<JiraApiResponse<any>> {
+    logger.info('Creating sprint', { boardId, name, startDate, endDate });
+    const payload: any = {
+      name,
+      originBoardId: parseInt(boardId)
+    };
+    
+    if (startDate) {
+      payload.startDate = startDate;
+    }
+    
+    if (endDate) {
+      payload.endDate = endDate;
+    }
+    
+    return this.request<any>('POST', '/rest/agile/1.0/sprint', payload);
+  }
+
+  async startSprint(sprintId: string, startDate?: string, endDate?: string): Promise<JiraApiResponse<any>> {
+    logger.info('Starting sprint', { sprintId, startDate, endDate });
+    const payload: any = {
+      state: 'active'
+    };
+    
+    if (startDate) {
+      payload.startDate = startDate;
+    }
+    
+    if (endDate) {
+      payload.endDate = endDate;
+    }
+    
+    return this.request<any>('POST', `/rest/agile/1.0/sprint/${sprintId}`, payload);
+  }
+
+  async completeSprint(sprintId: string): Promise<JiraApiResponse<any>> {
+    logger.info('Completing sprint', { sprintId });
+    const payload = {
+      state: 'closed'
+    };
+    return this.request<any>('POST', `/rest/agile/1.0/sprint/${sprintId}`, payload);
   }
 
   async getProjects(): Promise<JiraApiResponse<any[]>> {

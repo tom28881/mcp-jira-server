@@ -1,24 +1,43 @@
 # MCP Jira Server
 
-A Model Context Protocol (MCP) server that enables Claude Code to interact with Jira for project management, issue tracking, and agile workflows.
+A comprehensive Model Context Protocol (MCP) server for Jira integration with Claude Code. This server provides complete Jira functionality including issue management, sprint operations, comments, attachments, and batch processing.
 
-⚠️ **Security Note**: Never commit your API tokens! See [SECURITY.md](SECURITY.md) for best practices.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.4+-blue.svg)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
 
-## Features
+⚠️ **Security Note**: Never commit your API tokens! All credentials should be in `.env` files or environment variables.
 
-### Tools
-- **create-issue** - Create new Jira issues with full field support (including subtasks with parent field)
-- **update-issue** - Update existing issues
+## 🚀 Features
+
+### 📋 Issue Management (12 tools)
+- **create-issue** - Create issues with full field support including custom fields and dates
+- **update-issue** - Update existing issues with smart field handling
 - **get-issue** - Retrieve detailed issue information
-- **search-issues** - Search using JQL or simplified filters
+- **search-issues** - Advanced search using JQL or simplified filters with date support
 - **transition-issue** - Move issues through workflow states
 - **link-issues** - Create relationships between issues (with smart type matching)
-- **add-comment** - Add comments to issues
 - **get-link-types** - List available issue link types
 - **get-fields** - Show available fields for project/issue type
-- **create-epic-with-subtasks** - Create an epic with multiple subtasks in one operation
-- **diagnose-fields** - Diagnose field configuration issues and find correct custom field IDs
-- **create-task-for-epic** - Create a task linked to an epic (optimized for Czech Jira)
+- **diagnose-fields** - Troubleshoot field configuration and find custom field IDs
+- **create-epic-with-subtasks** - Create epic with multiple subtasks in one operation
+- **create-task-for-epic** - Create task linked to epic (optimized for localized Jira)
+
+### 💬 Comments & History (3 tools)
+- **get-comments** - Read issue comments with author and timestamp information
+- **get-history** - View detailed change history with field modifications
+- **add-comment** - Add comments with Atlassian Document Format support
+- **batch-comment** - Add same comment to multiple issues simultaneously
+
+### 📎 Attachments (2 tools)
+- **get-attachments** - List attachments with metadata (size, type, upload date)
+- **upload-attachment** - Upload files using base64 encoding
+
+### 🏃 Sprint & Agile Management (4 tools)
+- **get-boards** - List available Jira boards for agile projects
+- **get-sprints** - View sprints for a board with status indicators
+- **move-issue-to-sprint** - Move issues between sprints and backlog
+- **create-sprint** - Create new sprints with optional start/end dates
 
 ### Resources
 - `jira://projects` - List all accessible projects

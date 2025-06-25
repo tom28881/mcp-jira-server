@@ -74,6 +74,17 @@ const AddCommentSchema = z.object({
   comment: z.string().describe('Comment text to add')
 });
 
+const GetCommentsSchema = z.object({
+  issueKey: z.string().describe('Issue key (e.g., "PROJ-123")'),
+  maxResults: z.number().optional().default(50).describe('Maximum comments to return'),
+  orderBy: z.enum(['created', '-created']).optional().default('-created').describe('Sort order (newest first by default)')
+});
+
+const GetHistorySchema = z.object({
+  issueKey: z.string().describe('Issue key (e.g., "PROJ-123")'),
+  maxResults: z.number().optional().default(50).describe('Maximum history items to return')
+});
+
 const GetFieldsSchema = z.object({
   project: z.string().describe('Project key'),
   issueType: z.string().optional().describe('Issue type name')
@@ -103,6 +114,43 @@ const CreateEpicWithSubtasksSchema = z.object({
   })).describe('Array of subtasks to create')
 });
 
+const GetAttachmentsSchema = z.object({
+  issueKey: z.string().describe('Issue key (e.g., "PROJ-123")')
+});
+
+const UploadAttachmentSchema = z.object({
+  issueKey: z.string().describe('Issue key (e.g., "PROJ-123")'),
+  fileName: z.string().describe('Name of the file to upload'),
+  content: z.string().describe('Base64 encoded file content'),
+  mimeType: z.string().optional().describe('MIME type of the file')
+});
+
+const GetBoardsSchema = z.object({
+  projectKey: z.string().optional().describe('Filter boards by project key')
+});
+
+const GetSprintsSchema = z.object({
+  boardId: z.string().describe('Board ID to get sprints from')
+});
+
+const CreateSprintSchema = z.object({
+  boardId: z.string().describe('Board ID where sprint will be created'),
+  name: z.string().describe('Sprint name'),
+  startDate: z.string().optional().describe('Start date (formats: "2024-12-31", "31.12.2024", "today", "tomorrow")'),
+  endDate: z.string().optional().describe('End date (formats: "2024-12-31", "31.12.2024", "next week", "+14d")')
+});
+
+const MoveIssueToSprintSchema = z.object({
+  issueKey: z.string().describe('Issue key to move'),
+  sprintId: z.string().describe('Target sprint ID')
+});
+
+const BatchCommentSchema = z.object({
+  issueKeys: z.array(z.string()).describe('Array of issue keys to comment on'),
+  comment: z.string().describe('Comment text to add to all issues'),
+  continueOnError: z.boolean().optional().default(true).describe('Continue processing if one comment fails')
+});
+
 interface ToolDefinition {
   description: string;
   inputSchema: any;
@@ -127,6 +175,23 @@ function normalizeIssueType(localizedType: string): string {
     }
   }
   return localizedType; // Return as-is if no mapping found
+}
+
+// Helper to extract plain text from Atlassian Document Format (ADF)
+function extractTextFromADF(adf: any): string {
+  if (!adf || typeof adf !== 'object') {
+    return '';
+  }
+  
+  if (adf.type === 'text') {
+    return adf.text || '';
+  }
+  
+  if (adf.content && Array.isArray(adf.content)) {
+    return adf.content.map(extractTextFromADF).join('');
+  }
+  
+  return '';
 }
 
 export function createIssueTools(client: JiraClient, config: Config): Record<string, ToolDefinition> {
@@ -1396,6 +1461,652 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
           };
         } catch (error) {
           logger.error('Error in create-task-for-epic handler', error);
+          
+          if (error instanceof z.ZodError) {
+            const issues = error.issues.map(issue => `- ${issue.path.join('.')}: ${issue.message}`).join('\n');
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Invalid parameters:\n${issues}`
+              }]
+            };
+          }
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }]
+          };
+        }
+      }
+    },
+
+    'get-comments': {
+      description: 'Get comments for a Jira issue',
+      inputSchema: zodToJsonSchema(GetCommentsSchema) as any,
+      handler: async (args: unknown) => {
+        try {
+          const params = GetCommentsSchema.parse(args);
+          logger.debug('Getting comments for issue', params);
+          
+          const result = await client.getComments(params.issueKey, params.maxResults, params.orderBy);
+          
+          if (!result.success || !result.data) {
+            logger.error('Failed to get comments', { error: result.error });
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Failed to get comments for ${params.issueKey}: ${result.error}`
+              }]
+            };
+          }
+          
+          const comments = result.data.comments || [];
+          
+          if (comments.length === 0) {
+            return {
+              content: [{
+                type: 'text',
+                text: `📝 No comments found for ${params.issueKey}`
+              }]
+            };
+          }
+          
+          // Format comments with author, date, and body
+          const formattedComments = comments.map((comment: any, index: number) => {
+            const author = comment.author?.displayName || 'Unknown';
+            const created = new Date(comment.created).toLocaleString();
+            const body = comment.body ? extractTextFromADF(comment.body) : 'No content';
+            
+            return `**Comment ${index + 1}** by ${author} on ${created}
+${body}`;
+          }).join('\n\n---\n\n');
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `📝 **Comments for ${params.issueKey}** (${comments.length} total):\n\n${formattedComments}`
+            }]
+          };
+        } catch (error) {
+          logger.error('Error in get-comments handler', error);
+          
+          if (error instanceof z.ZodError) {
+            const issues = error.issues.map(issue => `- ${issue.path.join('.')}: ${issue.message}`).join('\n');
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Invalid parameters:\n${issues}`
+              }]
+            };
+          }
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }]
+          };
+        }
+      }
+    },
+
+    'get-history': {
+      description: 'Get change history for a Jira issue',
+      inputSchema: zodToJsonSchema(GetHistorySchema) as any,
+      handler: async (args: unknown) => {
+        try {
+          const params = GetHistorySchema.parse(args);
+          logger.debug('Getting history for issue', params);
+          
+          const result = await client.getHistory(params.issueKey, params.maxResults);
+          
+          if (!result.success || !result.data) {
+            logger.error('Failed to get history', { error: result.error });
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Failed to get history for ${params.issueKey}: ${result.error}`
+              }]
+            };
+          }
+          
+          const histories = result.data.values || [];
+          
+          if (histories.length === 0) {
+            return {
+              content: [{
+                type: 'text',
+                text: `📜 No history changes found for ${params.issueKey}`
+              }]
+            };
+          }
+          
+          // Format history with author, date, and changes
+          const formattedHistory = histories.map((history: any) => {
+            const author = history.author?.displayName || 'Unknown';
+            const created = new Date(history.created).toLocaleString();
+            
+            if (!history.items || history.items.length === 0) {
+              return `**${author}** on ${created}: Updated issue (no details)`;
+            }
+            
+            const changes = history.items.map((item: any) => {
+              const field = item.field || 'Unknown field';
+              const fromValue = item.fromString || item.from || 'empty';
+              const toValue = item.toString || item.to || 'empty';
+              
+              return `  • ${field}: ${fromValue} → ${toValue}`;
+            }).join('\n');
+            
+            return `**${author}** on ${created}:\n${changes}`;
+          }).join('\n\n---\n\n');
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `📜 **Change History for ${params.issueKey}** (${histories.length} changes):\n\n${formattedHistory}`
+            }]
+          };
+        } catch (error) {
+          logger.error('Error in get-history handler', error);
+          
+          if (error instanceof z.ZodError) {
+            const issues = error.issues.map(issue => `- ${issue.path.join('.')}: ${issue.message}`).join('\n');
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Invalid parameters:\n${issues}`
+              }]
+            };
+          }
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }]
+          };
+        }
+      }
+    },
+
+    'get-attachments': {
+      description: 'Get attachments for a Jira issue',
+      inputSchema: zodToJsonSchema(GetAttachmentsSchema) as any,
+      handler: async (args: unknown) => {
+        try {
+          const params = GetAttachmentsSchema.parse(args);
+          logger.debug('Getting attachments for issue', params);
+          
+          const result = await client.getAttachments(params.issueKey);
+          
+          if (!result.success || !result.data) {
+            logger.error('Failed to get attachments', { error: result.error });
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Failed to get attachments for ${params.issueKey}: ${result.error}`
+              }]
+            };
+          }
+          
+          const attachments = result.data;
+          
+          if (attachments.length === 0) {
+            return {
+              content: [{
+                type: 'text',
+                text: `📎 No attachments found for ${params.issueKey}`
+              }]
+            };
+          }
+          
+          // Format attachments with name, size, and author
+          const formattedAttachments = attachments.map((attachment: any, index: number) => {
+            const name = attachment.filename || 'Unknown';
+            const size = attachment.size ? `${Math.round(attachment.size / 1024)} KB` : 'Unknown size';
+            const author = attachment.author?.displayName || 'Unknown';
+            const created = attachment.created ? new Date(attachment.created).toLocaleString() : 'Unknown date';
+            const mimeType = attachment.mimeType || 'Unknown type';
+            
+            return `**${index + 1}.** ${name} (${size})
+   • Type: ${mimeType}
+   • Uploaded by: ${author} on ${created}
+   • Download URL: ${attachment.content}`;
+          }).join('\n\n');
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `📎 **Attachments for ${params.issueKey}** (${attachments.length} total):\n\n${formattedAttachments}`
+            }]
+          };
+        } catch (error) {
+          logger.error('Error in get-attachments handler', error);
+          
+          if (error instanceof z.ZodError) {
+            const issues = error.issues.map(issue => `- ${issue.path.join('.')}: ${issue.message}`).join('\n');
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Invalid parameters:\n${issues}`
+              }]
+            };
+          }
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }]
+          };
+        }
+      }
+    },
+
+    'upload-attachment': {
+      description: 'Upload an attachment to a Jira issue',
+      inputSchema: zodToJsonSchema(UploadAttachmentSchema) as any,
+      handler: async (args: unknown) => {
+        try {
+          const params = UploadAttachmentSchema.parse(args);
+          logger.debug('Uploading attachment to issue', { issueKey: params.issueKey, fileName: params.fileName });
+          
+          // Decode base64 content
+          let fileContent: Buffer;
+          try {
+            fileContent = Buffer.from(params.content, 'base64');
+          } catch (error) {
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Invalid base64 content: ${error instanceof Error ? error.message : 'Unknown error'}`
+              }]
+            };
+          }
+          
+          const result = await client.addAttachment(params.issueKey, params.fileName, fileContent);
+          
+          if (!result.success) {
+            logger.error('Failed to upload attachment', { error: result.error });
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Failed to upload attachment to ${params.issueKey}: ${result.error}`
+              }]
+            };
+          }
+          
+          const size = fileContent.length ? `${Math.round(fileContent.length / 1024)} KB` : 'Unknown size';
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `✅ Successfully uploaded **${params.fileName}** (${size}) to ${params.issueKey}\n🔗 ${JiraFormatter.formatIssueLink(params.issueKey, config.jiraHost)}`
+            }]
+          };
+        } catch (error) {
+          logger.error('Error in upload-attachment handler', error);
+          
+          if (error instanceof z.ZodError) {
+            const issues = error.issues.map(issue => `- ${issue.path.join('.')}: ${issue.message}`).join('\n');
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Invalid parameters:\n${issues}`
+              }]
+            };
+          }
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }]
+          };
+        }
+      }
+    },
+
+    'get-boards': {
+      description: 'Get Jira boards for sprint management',
+      inputSchema: zodToJsonSchema(GetBoardsSchema) as any,
+      handler: async (args: unknown) => {
+        try {
+          const params = GetBoardsSchema.parse(args);
+          logger.debug('Getting boards', params);
+          
+          const result = await client.getBoards();
+          
+          if (!result.success || !result.data) {
+            logger.error('Failed to get boards', { error: result.error });
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Failed to get boards: ${result.error}`
+              }]
+            };
+          }
+          
+          const boards = result.data.values || [];
+          
+          if (boards.length === 0) {
+            return {
+              content: [{
+                type: 'text',
+                text: '📋 No boards found. Make sure you have access to Jira Software (Agile) boards.'
+              }]
+            };
+          }
+          
+          // Filter by project if specified
+          const filteredBoards = params.projectKey 
+            ? boards.filter((board: any) => board.location?.projectKey === params.projectKey)
+            : boards;
+          
+          const formattedBoards = filteredBoards.map((board: any) => {
+            const name = board.name || 'Unknown';
+            const id = board.id || 'Unknown';
+            const type = board.type || 'Unknown';
+            const projectKey = board.location?.projectKey || 'Unknown';
+            
+            return `**${name}** (ID: ${id})
+   • Type: ${type}
+   • Project: ${projectKey}`;
+          }).join('\n\n');
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `📋 **Available Boards** (${filteredBoards.length} total):\n\n${formattedBoards}`
+            }]
+          };
+        } catch (error) {
+          logger.error('Error in get-boards handler', error);
+          
+          if (error instanceof z.ZodError) {
+            const issues = error.issues.map(issue => `- ${issue.path.join('.')}: ${issue.message}`).join('\n');
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Invalid parameters:\n${issues}`
+              }]
+            };
+          }
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }]
+          };
+        }
+      }
+    },
+
+    'get-sprints': {
+      description: 'Get sprints for a specific board',
+      inputSchema: zodToJsonSchema(GetSprintsSchema) as any,
+      handler: async (args: unknown) => {
+        try {
+          const params = GetSprintsSchema.parse(args);
+          logger.debug('Getting sprints for board', params);
+          
+          const result = await client.getSprints(params.boardId);
+          
+          if (!result.success || !result.data) {
+            logger.error('Failed to get sprints', { error: result.error });
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Failed to get sprints for board ${params.boardId}: ${result.error}`
+              }]
+            };
+          }
+          
+          const sprints = result.data.values || [];
+          
+          if (sprints.length === 0) {
+            return {
+              content: [{
+                type: 'text',
+                text: `🏃 No sprints found for board ${params.boardId}`
+              }]
+            };
+          }
+          
+          const formattedSprints = sprints.map((sprint: any) => {
+            const name = sprint.name || 'Unknown';
+            const id = sprint.id || 'Unknown';
+            const state = sprint.state || 'Unknown';
+            const startDate = sprint.startDate ? new Date(sprint.startDate).toLocaleDateString() : 'Not set';
+            const endDate = sprint.endDate ? new Date(sprint.endDate).toLocaleDateString() : 'Not set';
+            
+            let stateIcon = '';
+            switch (state.toLowerCase()) {
+              case 'active': stateIcon = '🏃'; break;
+              case 'closed': stateIcon = '✅'; break;
+              case 'future': stateIcon = '📅'; break;
+              default: stateIcon = '❓'; break;
+            }
+            
+            return `${stateIcon} **${name}** (ID: ${id})
+   • State: ${state}
+   • Start: ${startDate}
+   • End: ${endDate}`;
+          }).join('\n\n');
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `🏃 **Sprints for Board ${params.boardId}** (${sprints.length} total):\n\n${formattedSprints}`
+            }]
+          };
+        } catch (error) {
+          logger.error('Error in get-sprints handler', error);
+          
+          if (error instanceof z.ZodError) {
+            const issues = error.issues.map(issue => `- ${issue.path.join('.')}: ${issue.message}`).join('\n');
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Invalid parameters:\n${issues}`
+              }]
+            };
+          }
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }]
+          };
+        }
+      }
+    },
+
+    'move-issue-to-sprint': {
+      description: 'Move an issue to a specific sprint',
+      inputSchema: zodToJsonSchema(MoveIssueToSprintSchema) as any,
+      handler: async (args: unknown) => {
+        try {
+          const params = MoveIssueToSprintSchema.parse(args);
+          logger.debug('Moving issue to sprint', params);
+          
+          const result = await client.moveIssueToSprint(params.issueKey, params.sprintId);
+          
+          if (!result.success) {
+            logger.error('Failed to move issue to sprint', { error: result.error });
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Failed to move ${params.issueKey} to sprint ${params.sprintId}: ${result.error}`
+              }]
+            };
+          }
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `✅ Successfully moved **${params.issueKey}** to sprint **${params.sprintId}**\n🔗 ${JiraFormatter.formatIssueLink(params.issueKey, config.jiraHost)}`
+            }]
+          };
+        } catch (error) {
+          logger.error('Error in move-issue-to-sprint handler', error);
+          
+          if (error instanceof z.ZodError) {
+            const issues = error.issues.map(issue => `- ${issue.path.join('.')}: ${issue.message}`).join('\n');
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Invalid parameters:\n${issues}`
+              }]
+            };
+          }
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }]
+          };
+        }
+      }
+    },
+
+    'create-sprint': {
+      description: 'Create a new sprint on a board',
+      inputSchema: zodToJsonSchema(CreateSprintSchema) as any,
+      handler: async (args: unknown) => {
+        try {
+          const params = CreateSprintSchema.parse(args);
+          logger.debug('Creating sprint', params);
+          
+          // Parse dates if provided
+          const startDate = params.startDate ? parseDate(params.startDate) : undefined;
+          const endDate = params.endDate ? parseDate(params.endDate) : undefined;
+          
+          const result = await client.createSprint(params.boardId, params.name, startDate, endDate);
+          
+          if (!result.success || !result.data) {
+            logger.error('Failed to create sprint', { error: result.error });
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Failed to create sprint: ${result.error}`
+              }]
+            };
+          }
+          
+          const sprint = result.data;
+          const sprintId = sprint.id || 'Unknown';
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `✅ Successfully created sprint **${params.name}** (ID: ${sprintId}) on board ${params.boardId}
+${startDate ? `📅 Start: ${startDate}` : ''}
+${endDate ? `🏁 End: ${endDate}` : ''}`
+            }]
+          };
+        } catch (error) {
+          logger.error('Error in create-sprint handler', error);
+          
+          if (error instanceof z.ZodError) {
+            const issues = error.issues.map(issue => `- ${issue.path.join('.')}: ${issue.message}`).join('\n');
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Invalid parameters:\n${issues}`
+              }]
+            };
+          }
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }]
+          };
+        }
+      }
+    },
+
+    'batch-comment': {
+      description: 'Add the same comment to multiple Jira issues',
+      inputSchema: zodToJsonSchema(BatchCommentSchema) as any,
+      handler: async (args: unknown) => {
+        try {
+          const params = BatchCommentSchema.parse(args);
+          logger.debug('Adding batch comment to issues', { 
+            issueCount: params.issueKeys.length, 
+            commentLength: params.comment.length 
+          });
+          
+          const results: { issueKey: string; success: boolean; error?: string }[] = [];
+          
+          // Process comments in parallel for better performance
+          const commentPromises = params.issueKeys.map(async (issueKey) => {
+            try {
+              const result = await client.addComment(issueKey, params.comment);
+              return {
+                issueKey,
+                success: result.success,
+                error: result.error
+              };
+            } catch (error) {
+              return {
+                issueKey,
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error'
+              };
+            }
+          });
+          
+          const commentResults = await Promise.all(commentPromises);
+          results.push(...commentResults);
+          
+          const successful = results.filter(r => r.success);
+          const failed = results.filter(r => !r.success);
+          
+          let responseText = `💬 **Batch Comment Results**\n\n`;
+          
+          if (successful.length > 0) {
+            responseText += `✅ **Successfully commented on ${successful.length} issues:**\n`;
+            responseText += successful.map(r => `• ${r.issueKey}`).join('\n');
+            responseText += '\n\n';
+          }
+          
+          if (failed.length > 0) {
+            responseText += `❌ **Failed to comment on ${failed.length} issues:**\n`;
+            responseText += failed.map(r => `• ${r.issueKey}: ${r.error}`).join('\n');
+            responseText += '\n\n';
+          }
+          
+          responseText += `📊 **Summary:** ${successful.length}/${params.issueKeys.length} successful`;
+          
+          // If we have successful comments, add links
+          if (successful.length > 0) {
+            responseText += '\n\n🔗 **Issue Links:**\n';
+            responseText += successful.slice(0, 5).map(r => 
+              `• ${JiraFormatter.formatIssueLink(r.issueKey, config.jiraHost)}`
+            ).join('\n');
+            
+            if (successful.length > 5) {
+              responseText += `\n• ... and ${successful.length - 5} more`;
+            }
+          }
+          
+          return {
+            content: [{
+              type: 'text',
+              text: responseText
+            }]
+          };
+        } catch (error) {
+          logger.error('Error in batch-comment handler', error);
           
           if (error instanceof z.ZodError) {
             const issues = error.issues.map(issue => `- ${issue.path.join('.')}: ${issue.message}`).join('\n');
