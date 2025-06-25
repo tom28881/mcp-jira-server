@@ -44,5 +44,8 @@ claude_settings_example.json
 test-server.js
 claude_code_example.sh
 
+# Personal configuration files (keep template, ignore real configs)
+claude_settings_personal.json
+
 # Local scripts
 run-jira-mcp.sh
