@@ -1,4 +1,4 @@
-# MCP Jira Server
+# MCP Jira Server fo Claude Code
 
 A comprehensive Model Context Protocol (MCP) server for Jira integration with Claude Code. This server provides complete Jira functionality including issue management, sprint operations, comments, attachments, and batch processing.
 
