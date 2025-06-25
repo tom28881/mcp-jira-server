@@ -117,6 +117,7 @@ function normalizeIssueType(localizedType: string): string {
 }
 
 export function createIssueTools(client: JiraClient, config: Config): Record<string, ToolDefinition> {
+  // For now, use configured fields - auto-detection can be added in future version
   const customFields = {
     storyPoints: config.fieldStoryPoints,
     acceptanceCriteria: config.fieldAcceptanceCriteria,

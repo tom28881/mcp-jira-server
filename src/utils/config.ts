@@ -14,11 +14,12 @@ const ConfigSchema = z.object({
   jiraEmail: z.string().email(),
   jiraApiToken: z.string().min(1),
   defaultProject: z.string().optional(),
-  fieldStoryPoints: z.string().optional().default('customfield_10001'),
-  fieldAcceptanceCriteria: z.string().optional().default('customfield_10002'),
-  fieldEpicLink: z.string().optional().default('customfield_10003'),
+  fieldStoryPoints: z.string().optional(), // No default - will be auto-detected
+  fieldAcceptanceCriteria: z.string().optional(), // No default - will be auto-detected
+  fieldEpicLink: z.string().optional(), // No default - will be auto-detected
   autoCreateTestTickets: z.boolean().optional().default(false),
-  defaultAssignee: z.string().optional()
+  defaultAssignee: z.string().optional(),
+  autoDetectFields: z.boolean().optional().default(true) // Enable auto-detection by default
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -35,7 +36,8 @@ export function loadConfig(): Config {
     fieldAcceptanceCriteria: process.env.JIRA_FIELD_ACCEPTANCE_CRITERIA,
     fieldEpicLink: process.env.JIRA_FIELD_EPIC_LINK,
     autoCreateTestTickets: process.env.AUTO_CREATE_TEST_TICKETS === 'true',
-    defaultAssignee: process.env.DEFAULT_ASSIGNEE
+    defaultAssignee: process.env.DEFAULT_ASSIGNEE,
+    autoDetectFields: process.env.AUTO_DETECT_FIELDS !== 'false' // Default true unless explicitly disabled
   };
 
   // Log loaded values (mask sensitive data)
@@ -93,7 +95,7 @@ export function loadConfig(): Config {
   }
 }
 
-export function getCustomFieldMapping(config: Config): Record<string, string> {
+export function getCustomFieldMapping(config: Config): Record<string, string | undefined> {
   return {
     storyPoints: config.fieldStoryPoints,
     acceptanceCriteria: config.fieldAcceptanceCriteria,

@@ -205,12 +205,24 @@ Create release notes for version 2.0 in project PROJ
 
 ### Custom Fields
 
-Configure custom field IDs in your `.env`:
+The server can work with any Jira configuration:
+
+#### Option 1: Auto-Detection (Recommended)
+Leave custom field IDs unset in `.env` and the server will automatically detect them based on field names.
+
+#### Option 2: Manual Configuration
+If auto-detection doesn't work, configure custom field IDs in your `.env`:
 
 ```env
 JIRA_FIELD_STORY_POINTS=customfield_10001
 JIRA_FIELD_ACCEPTANCE_CRITERIA=customfield_10002
 JIRA_FIELD_EPIC_LINK=customfield_10003
+```
+
+#### Finding Field IDs
+Use the `diagnose-fields` tool to find the correct field IDs for your Jira instance:
+```
+diagnose-fields project:"PROJ" issueType:"Story"
 ```
 
 ### Auto-create Test Tickets
@@ -245,9 +257,10 @@ npm run lint
 
 ### 🌍 Localization Support
 - Automatic support for localized Jira instances (Czech, English, etc.)
-- Issue type names can be in any language
-- Priority names support localization
+- Issue type names can be in any language (e.g., "Task", "Úkol", "Aufgabe")
+- Priority names support localization (e.g., "High", "Vysoká", "Hoch")
 - Special support for Czech Jira configurations
+- Works with any Jira language setting
 
 ### 🔄 Automatic Retry
 The server automatically retries failed requests with exponential backoff (up to 3 attempts).
@@ -272,6 +285,18 @@ The server tests the connection on startup and provides clear error messages if 
 Automatically converts plain text and markdown to Jira's ADF format for rich text fields.
 
 ## Troubleshooting
+
+### Working with Different Jira Configurations
+
+This MCP server is designed to work with **any Jira instance** regardless of:
+- Language settings (English, Czech, German, etc.)
+- Custom field configurations
+- Project-specific settings
+
+**Best Practices:**
+1. Use `get-fields` to see available issue types in your language
+2. Use `diagnose-fields` to find custom field IDs
+3. Create issues using the exact issue type names from your Jira
 
 ### Common Issues
 
