@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "jira": {
+      "command": "node",
+      "args": ["/absolute/path/to/mcp-jira-server/dist/index.js"],
+      "env": {
+        "JIRA_HOST": "https://your-company.atlassian.net",
+        "JIRA_EMAIL": "your-email@company.com",
+        "JIRA_API_TOKEN": "your-api-token-here",
+        "JIRA_DEFAULT_PROJECT": "YOUR_PROJECT_KEY"
+      }
+    }
+  }
+}
