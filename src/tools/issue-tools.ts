@@ -66,6 +66,11 @@ const GetFieldsSchema = z.object({
   issueType: z.string().optional().describe('Issue type name')
 });
 
+const DiagnoseFieldsSchema = z.object({
+  project: z.string().describe('Project key'),
+  issueType: z.string().describe('Issue type name')
+});
+
 const CreateEpicWithSubtasksSchema = z.object({
   project: z.string().describe('Project key'),
   epicSummary: z.string().describe('Epic summary'),
@@ -176,7 +181,23 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
         const result = await client.createIssue(payload);
 
         if (!result.success || !result.data) {
-          logger.error('Failed to create issue', { error: result.error });
+          logger.error('Failed to create issue', { 
+            error: result.error,
+            payload: payload,
+            epicLinkField: customFields.epicLink,
+            hasEpicLink: !!params.epicLink
+          });
+          
+          // Check if it's an epic link field issue
+          if (params.epicLink && result.error?.includes('customfield_')) {
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Failed to create issue: ${result.error}\n\n💡 This might be due to incorrect Epic Link field ID.\nRun diagnose-fields to find the correct field ID for your Jira instance.`
+              }]
+            };
+          }
+          
           return {
             content: [{
               type: 'text',
@@ -1018,6 +1039,148 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
           };
         } catch (error) {
           logger.error('Error in get-fields handler', error);
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }]
+          };
+        }
+      }
+    },
+
+    'diagnose-fields': {
+      description: 'Diagnose field issues and find correct custom field IDs',
+      inputSchema: zodToJsonSchema(DiagnoseFieldsSchema) as any,
+      handler: async (args: unknown) => {
+        try {
+          const params = DiagnoseFieldsSchema.parse(args);
+          logger.info('Diagnosing fields', params);
+          
+          const result = await client.getCreateMeta(params.project);
+          
+          if (!result.success || !result.data) {
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Failed to get field metadata: ${result.error || 'Unknown error'}`
+              }]
+            };
+          }
+          
+          const project = result.data.projects?.[0];
+          if (!project) {
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Project ${params.project} not found`
+              }]
+            };
+          }
+          
+          const issueType = project.issuetypes?.find((it: any) => 
+            it.name.toLowerCase() === params.issueType.toLowerCase()
+          );
+          
+          if (!issueType) {
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Issue type "${params.issueType}" not found`
+              }]
+            };
+          }
+          
+          const fields = issueType.fields || {};
+          let epicLinkField: any = null;
+          let parentField: any = null;
+          let storyPointsField: any = null;
+          let acceptanceCriteriaField: any = null;
+          const customFields: any[] = [];
+          
+          Object.entries(fields).forEach(([key, field]: [string, any]) => {
+            if (key.startsWith('customfield_')) {
+              customFields.push({
+                id: key,
+                name: field.name,
+                required: field.required,
+                schema: field.schema
+              });
+              
+              // Try to identify Epic Link field
+              const fieldName = field.name?.toLowerCase() || '';
+              if (fieldName.includes('epic link') || 
+                  fieldName.includes('epic name') ||
+                  fieldName.includes('parent epic') ||
+                  fieldName.includes('parent')) {
+                epicLinkField = { id: key, name: field.name };
+              }
+              
+              // Try to identify Story Points field
+              if (fieldName.includes('story point')) {
+                storyPointsField = { id: key, name: field.name };
+              }
+              
+              // Try to identify Acceptance Criteria field
+              if (fieldName.includes('acceptance criteria')) {
+                acceptanceCriteriaField = { id: key, name: field.name };
+              }
+            } else if (key === 'parent') {
+              parentField = { id: key, name: field.name };
+            }
+          });
+          
+          let response = `🔍 Field Diagnosis for ${params.project} - ${params.issueType}:\n\n`;
+          
+          response += `**Standard Fields:**\n`;
+          if (parentField) {
+            response += `✅ Parent field found: "${parentField.name}" (${parentField.id})\n`;
+          } else {
+            response += `❌ Parent field not found\n`;
+          }
+          
+          response += `\n**Custom Fields Found:**\n`;
+          if (epicLinkField) {
+            response += `✅ Epic Link field: "${epicLinkField.name}" (${epicLinkField.id})\n`;
+            response += `   Current config: ${config.fieldEpicLink || 'not set'}\n`;
+            if (epicLinkField.id !== config.fieldEpicLink) {
+              response += `   ⚠️  Update .env: JIRA_FIELD_EPIC_LINK=${epicLinkField.id}\n`;
+            }
+          } else {
+            response += `❌ Epic Link field not found\n`;
+          }
+          
+          if (storyPointsField) {
+            response += `✅ Story Points field: "${storyPointsField.name}" (${storyPointsField.id})\n`;
+          }
+          
+          if (acceptanceCriteriaField) {
+            response += `✅ Acceptance Criteria field: "${acceptanceCriteriaField.name}" (${acceptanceCriteriaField.id})\n`;
+          }
+          
+          response += `\n**All Custom Fields (${customFields.length}):**\n`;
+          customFields.forEach((field: any) => {
+            response += `• ${field.name} (${field.id})${field.required ? ' [REQUIRED]' : ''}\n`;
+          });
+          
+          response += `\n**Recommendations:**\n`;
+          if (epicLinkField && epicLinkField.id !== config.fieldEpicLink) {
+            response += `1. Update your .env file with: JIRA_FIELD_EPIC_LINK=${epicLinkField.id}\n`;
+          }
+          if (!epicLinkField && params.issueType.toLowerCase() !== 'epic') {
+            response += `1. Epic Link field not found. Stories might not be linkable to epics.\n`;
+            response += `   Check the custom fields list above for the correct field.\n`;
+          }
+          response += `2. Restart the MCP server after updating .env\n`;
+          
+          return {
+            content: [{
+              type: 'text',
+              text: response
+            }]
+          };
+        } catch (error) {
+          logger.error('Error in diagnose-fields handler', error);
           return {
             content: [{
               type: 'text',

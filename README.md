@@ -17,6 +17,7 @@ A Model Context Protocol (MCP) server that enables Claude Code to interact with 
 - **get-link-types** - List available issue link types
 - **get-fields** - Show available fields for project/issue type
 - **create-epic-with-subtasks** - Create an epic with multiple subtasks in one operation
+- **diagnose-fields** - Diagnose field configuration issues and find correct custom field IDs
 
 ### Resources
 - `jira://projects` - List all accessible projects
@@ -267,14 +268,22 @@ Automatically converts plain text and markdown to Jira's ADF format for rich tex
    - Check the project key is correct (case-sensitive)
 
 3. **Custom Fields Not Working**
-   - Use `get-fields` tool to see available fields for your project
+   - Use `diagnose-fields` tool to find the correct field IDs for your project
+   - Use `get-fields` tool to see all available fields
    - Custom field IDs typically start with `customfield_`
    - Some fields may not be available for certain issue types (e.g., labels on Epics)
+   - Epic Link field ID varies between Jira instances
 
 4. **Link Type Not Found**
    - Use `get-link-types` tool to see available link types
    - Link types are case-sensitive in Jira API
    - The server will try to match case-insensitively
+   - Epic-Story relationships use epicLink field, not regular issue links
+
+5. **Epic-Story Linking Issues**
+   - Run `diagnose-fields` for project and "Story" issue type
+   - Update JIRA_FIELD_EPIC_LINK in .env with the correct field ID
+   - Restart the MCP server after updating .env
 
 ### Debug Mode
 
