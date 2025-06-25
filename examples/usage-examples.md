@@ -131,6 +131,28 @@ Get details for project PROJ
 Show me the details of PROJ-123
 ```
 
+## Troubleshooting Tools
+
+### Check Available Fields
+```
+Show me available fields for project PROJ
+```
+
+```
+What fields can I use for Epic issue type in project PROJ?
+```
+
+### Check Link Types
+```
+Show me available link types
+```
+
+### Debug Create Issue
+If create-issue fails, first check available fields:
+```
+get-fields for project PROJ and issue type Epic
+```
+
 ## Advanced Examples
 
 ### Bulk Operations
@@ -146,4 +168,13 @@ Create a story "New feature" in PROJ, then create a test ticket for it and link 
 ### Reporting
 ```
 Search for all issues completed in PROJ this week and summarize them for the weekly report
+```
+
+### Smart Linking
+The link-issues tool now automatically matches link types:
+```
+# These all work:
+Link PROJ-1 blocks PROJ-2
+Link PROJ-1 Blocks PROJ-2  
+Link PROJ-1 BLOCKS PROJ-2
 ```

@@ -143,11 +143,35 @@ export class JiraClient {
   }
 
   async createIssue(payload: CreateIssuePayload): Promise<JiraApiResponse<JiraIssue>> {
-    logger.info('Creating issue', { projectKey: payload.fields.project.key, issueType: payload.fields.issuetype.name });
+    logger.info('Creating issue', { 
+      projectKey: payload.fields.project.key, 
+      issueType: payload.fields.issuetype.name,
+      hasLabels: !!payload.fields.labels,
+      customFieldCount: Object.keys(payload.fields).filter(k => k.startsWith('customfield_')).length
+    });
+    
+    // Log the full payload for debugging (mask sensitive data)
+    logger.debug('Create issue payload', {
+      ...payload,
+      fields: {
+        ...payload.fields,
+        description: payload.fields.description ? '[CONTENT]' : undefined
+      }
+    });
+    
     const result = await this.request<JiraIssue>('POST', '/issue', payload);
     
     if (result.success) {
       logger.info('Issue created successfully', { key: result.data?.key });
+    } else {
+      logger.error('Issue creation failed', { 
+        error: result.error,
+        payload: {
+          project: payload.fields.project,
+          issuetype: payload.fields.issuetype,
+          fieldKeys: Object.keys(payload.fields)
+        }
+      });
     }
     
     return result;
@@ -174,6 +198,11 @@ export class JiraClient {
       maxResults: maxResults.toString()
     });
     return this.request<JiraSearchResult>('GET', `/search?${params}`);
+  }
+
+  async getLinkTypes(): Promise<JiraApiResponse<any[]>> {
+    logger.info('Getting issue link types');
+    return this.request<any[]>('GET', '/issueLinkType');
   }
 
   async linkIssues(inwardIssue: string, outwardIssue: string, linkType: string): Promise<JiraApiResponse<void>> {
@@ -269,6 +298,15 @@ export class JiraClient {
   async getIssueTypes(projectKey: string): Promise<JiraApiResponse<any[]>> {
     logger.info('Getting issue types', { projectKey });
     return this.request<any[]>('GET', `/project/${projectKey}/statuses`);
+  }
+
+  async getCreateMeta(projectKey: string, issueTypeId?: string): Promise<JiraApiResponse<any>> {
+    logger.info('Getting create metadata', { projectKey, issueTypeId });
+    let endpoint = `/issue/createmeta?projectKeys=${projectKey}&expand=projects.issuetypes.fields`;
+    if (issueTypeId) {
+      endpoint += `&issuetypeIds=${issueTypeId}`;
+    }
+    return this.request<any>('GET', endpoint);
   }
 
   async getCurrentUser(): Promise<JiraApiResponse<any>> {

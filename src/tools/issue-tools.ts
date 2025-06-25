@@ -60,6 +60,11 @@ const AddCommentSchema = z.object({
   comment: z.string().describe('Comment text to add')
 });
 
+const GetFieldsSchema = z.object({
+  project: z.string().describe('Project key'),
+  issueType: z.string().optional().describe('Issue type name')
+});
+
 interface ToolDefinition {
   description: string;
   inputSchema: any;
@@ -115,7 +120,9 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
         }
 
         if (params.labels) {
+          // Some issue types (like Epic) might not support labels
           payload.fields.labels = params.labels;
+          logger.debug('Adding labels to issue', { labels: params.labels });
         }
 
         if (params.components) {
@@ -140,7 +147,14 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
           payload.fields[customFields.epicLink] = params.epicLink;
         }
 
-        logger.debug('Sending create issue request', { projectKey });
+        // Log full payload for debugging
+        logger.debug('Create issue payload', { 
+          payload,
+          hasLabels: !!params.labels,
+          hasAcceptanceCriteria: !!params.acceptanceCriteria,
+          customFields: Object.keys(payload.fields).filter(k => k.startsWith('customfield_'))
+        });
+        
         const result = await client.createIssue(payload);
 
         if (!result.success || !result.data) {
@@ -513,29 +527,153 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
       description: 'Link two Jira issues together',
       inputSchema: zodToJsonSchema(LinkIssuesSchema) as any,
       handler: async (args: unknown) => {
-        const params = LinkIssuesSchema.parse(args);
-        
-        const result = await client.linkIssues(
-          params.inwardIssue,
-          params.outwardIssue,
-          params.linkType
-        );
+        try {
+          const params = LinkIssuesSchema.parse(args);
+          logger.debug('Linking issues', params);
+          
+          // First, try to link with the provided link type
+          let result = await client.linkIssues(
+            params.inwardIssue,
+            params.outwardIssue,
+            params.linkType
+          );
 
-        if (!result.success) {
+          // If it fails due to link type not found, try to get available types and match
+          if (!result.success && result.error?.includes('typ odkazu')) {
+            logger.info('Link type not found, fetching available types');
+            
+            const linkTypesResult = await client.getLinkTypes();
+            if (linkTypesResult.success && linkTypesResult.data) {
+              logger.debug('Available link types', { 
+                count: linkTypesResult.data.length,
+                types: linkTypesResult.data.map((lt: any) => ({ 
+                  name: lt.name, 
+                  inward: lt.inward, 
+                  outward: lt.outward 
+                }))
+              });
+              
+              // Try to find matching link type (case-insensitive)
+              const requestedType = params.linkType.toLowerCase();
+              const matchingType = linkTypesResult.data.find((lt: any) => {
+                return lt.name?.toLowerCase() === requestedType ||
+                       lt.inward?.toLowerCase() === requestedType ||
+                       lt.outward?.toLowerCase() === requestedType;
+              });
+              
+              if (matchingType) {
+                logger.info('Found matching link type', { 
+                  requested: params.linkType, 
+                  matched: matchingType.name 
+                });
+                
+                // Retry with the correct name
+                result = await client.linkIssues(
+                  params.inwardIssue,
+                  params.outwardIssue,
+                  matchingType.name
+                );
+              } else {
+                // Provide helpful error with available types
+                const availableTypes = linkTypesResult.data
+                  .map((lt: any) => `"${lt.name}" (${lt.inward}/${lt.outward})`)
+                  .join(', ');
+                  
+                return {
+                  content: [{
+                    type: 'text',
+                    text: `❌ Link type "${params.linkType}" not found.\nAvailable types: ${availableTypes}`
+                  }]
+                };
+              }
+            }
+          }
+
+          if (!result.success) {
+            logger.error('Failed to link issues', { error: result.error });
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Failed to link issues: ${result.error}`
+              }]
+            };
+          }
+
+          logger.info('Issues linked successfully', { 
+            inward: params.inwardIssue, 
+            outward: params.outwardIssue, 
+            linkType: params.linkType 
+          });
+          
           return {
             content: [{
               type: 'text',
-              text: `❌ Failed to link issues: ${result.error}`
+              text: `✅ Linked ${params.inwardIssue} to ${params.outwardIssue} with "${params.linkType}"`
+            }]
+          };
+        } catch (error) {
+          logger.error('Error in link-issues handler', error);
+          
+          if (error instanceof z.ZodError) {
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Invalid parameters: ${error.errors.map(e => e.message).join(', ')}`
+              }]
+            };
+          }
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
             }]
           };
         }
+      }
+    },
 
-        return {
-          content: [{
-            type: 'text',
-            text: `✅ Linked ${params.inwardIssue} to ${params.outwardIssue} with "${params.linkType}"`
-          }]
-        };
+    'get-link-types': {
+      description: 'Get available issue link types',
+      inputSchema: zodToJsonSchema(z.object({})) as any,
+      handler: async () => {
+        try {
+          logger.info('Getting issue link types');
+          const result = await client.getLinkTypes();
+          
+          if (!result.success || !result.data) {
+            logger.error('Failed to get link types', { error: result.error });
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Failed to get link types: ${result.error || 'Unknown error'}`
+              }]
+            };
+          }
+          
+          const linkTypes = result.data;
+          logger.debug('Retrieved link types', { count: linkTypes.length });
+          
+          // Format the response
+          const formatted = linkTypes.map((lt: any) => {
+            return `• **${lt.name}**\n  - Inward: "${lt.inward}" (e.g., ${lt.inward} ${lt.name})\n  - Outward: "${lt.outward}" (e.g., ${lt.outward} ${lt.name})`;
+          }).join('\n\n');
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `🔗 Available Link Types:\n\n${formatted}`
+            }]
+          };
+        } catch (error) {
+          logger.error('Error in get-link-types handler', error);
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }]
+          };
+        }
       }
     },
 
@@ -562,6 +700,115 @@ export function createIssueTools(client: JiraClient, config: Config): Record<str
             text: `✅ Added comment to ${params.issueKey}`
           }]
         };
+      }
+    },
+
+    'get-fields': {
+      description: 'Get available fields for a project and issue type',
+      inputSchema: zodToJsonSchema(GetFieldsSchema) as any,
+      handler: async (args: unknown) => {
+        try {
+          const params = GetFieldsSchema.parse(args);
+          logger.info('Getting available fields', params);
+          
+          const result = await client.getCreateMeta(params.project);
+          
+          if (!result.success || !result.data) {
+            logger.error('Failed to get create metadata', { error: result.error });
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Failed to get fields: ${result.error || 'Unknown error'}`
+              }]
+            };
+          }
+          
+          const project = result.data.projects?.[0];
+          if (!project) {
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Project ${params.project} not found`
+              }]
+            };
+          }
+          
+          let issueType;
+          if (params.issueType) {
+            issueType = project.issuetypes?.find((it: any) => 
+              it.name.toLowerCase() === params.issueType?.toLowerCase()
+            );
+            if (!issueType) {
+              const available = project.issuetypes?.map((it: any) => it.name).join(', ') || 'None';
+              return {
+                content: [{
+                  type: 'text',
+                  text: `❌ Issue type "${params.issueType}" not found.\nAvailable types: ${available}`
+                }]
+              };
+            }
+          } else {
+            // List all issue types
+            const types = project.issuetypes?.map((it: any) => {
+              const fieldCount = Object.keys(it.fields || {}).length;
+              return `• **${it.name}** (${fieldCount} fields)`;
+            }).join('\n');
+            
+            return {
+              content: [{
+                type: 'text',
+                text: `📄 Issue types for ${params.project}:\n\n${types}\n\nUse get-fields with issueType parameter to see fields for a specific type.`
+              }]
+            };
+          }
+          
+          // Format fields for the issue type
+          const fields = issueType.fields || {};
+          const requiredFields: string[] = [];
+          const optionalFields: string[] = [];
+          const customFields: string[] = [];
+          
+          Object.entries(fields).forEach(([key, field]: [string, any]) => {
+            const fieldInfo = `**${field.name}** (${key})`;
+            
+            if (field.required) {
+              requiredFields.push(fieldInfo);
+            } else if (key.startsWith('customfield_')) {
+              customFields.push(fieldInfo);
+            } else {
+              optionalFields.push(fieldInfo);
+            }
+          });
+          
+          let formatted = `📄 Fields for ${params.project} - ${issueType.name}:\n\n`;
+          
+          if (requiredFields.length > 0) {
+            formatted += `**Required Fields:**\n${requiredFields.map(f => `• ${f}`).join('\n')}\n\n`;
+          }
+          
+          if (optionalFields.length > 0) {
+            formatted += `**Optional Fields:**\n${optionalFields.map(f => `• ${f}`).join('\n')}\n\n`;
+          }
+          
+          if (customFields.length > 0) {
+            formatted += `**Custom Fields:**\n${customFields.map(f => `• ${f}`).join('\n')}`;
+          }
+          
+          return {
+            content: [{
+              type: 'text',
+              text: formatted
+            }]
+          };
+        } catch (error) {
+          logger.error('Error in get-fields handler', error);
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }]
+          };
+        }
       }
     }
   };

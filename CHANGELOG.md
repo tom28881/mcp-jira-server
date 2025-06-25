@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed "Cannot read properties of undefined" error for create-issue
 - Improved handling of empty API responses
 - Better error messages with context
+- Fixed link-issues with case-insensitive matching
+- Better handling of fields not available for certain issue types
 
 ### Added
 - Comprehensive logging system with DEBUG support
@@ -21,11 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Convenient run.sh script for easier execution
 - Input validation with detailed error messages
 - Robust error handling for all edge cases
+- New `get-link-types` tool to list available issue link types
+- New `get-fields` tool to show available fields for project/issue type
+- Smart link type matching with fallback to available types
 
 ### Improved
 - More informative startup messages
 - Better handling of test ticket creation failures
 - Enhanced transition handling with available options display
+- Enhanced debug logging for create-issue payloads
+- Link-issues now shows available types on error
 
 ## [1.0.0] - 2024-12-19
 

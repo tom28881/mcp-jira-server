@@ -12,8 +12,10 @@ A Model Context Protocol (MCP) server that enables Claude Code to interact with 
 - **get-issue** - Retrieve detailed issue information
 - **search-issues** - Search using JQL or simplified filters
 - **transition-issue** - Move issues through workflow states
-- **link-issues** - Create relationships between issues
+- **link-issues** - Create relationships between issues (with smart type matching)
 - **add-comment** - Add comments to issues
+- **get-link-types** - List available issue link types
+- **get-fields** - Show available fields for project/issue type
 
 ### Resources
 - `jira://projects` - List all accessible projects
@@ -247,8 +249,14 @@ Automatically converts plain text and markdown to Jira's ADF format for rich tex
    - Check the project key is correct (case-sensitive)
 
 3. **Custom Fields Not Working**
-   - Use Jira's REST API browser to find correct field IDs
+   - Use `get-fields` tool to see available fields for your project
    - Custom field IDs typically start with `customfield_`
+   - Some fields may not be available for certain issue types (e.g., labels on Epics)
+
+4. **Link Type Not Found**
+   - Use `get-link-types` tool to see available link types
+   - Link types are case-sensitive in Jira API
+   - The server will try to match case-insensitively
 
 ### Debug Mode
 
